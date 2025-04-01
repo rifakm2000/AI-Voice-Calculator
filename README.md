@@ -25,5 +25,5 @@ A sophisticated voice-enabled calculator that understands natural language math 
 
 1. Clone the repository:
    ```bash
-   git clone https://github.com/yourusername/ai-voice-calculator.git
-   cd ai-voice-calculator
+   git clone https://github.com/rifakm2000/AI-Voice-Calculator.git
+  
