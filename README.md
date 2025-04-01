@@ -2,7 +2,7 @@
 
 A sophisticated voice-enabled calculator that understands natural language math expressions and provides accurate results with speech output.
 
-![Calculator Demo](https://via.placeholder.com/800x500.png?text=AI+Voice+Calculator+Pro+Demo)
+[![AI Voice Calculator Demo](./Demo/demo-thumbnail.jpg)](./Demo/ai_voice_calculator_demo.mp4)
 
 ## Features ✨
 
