@@ -1,0 +1,838 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Voice Calculator Pro</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css" rel="stylesheet">
+    <script>
+        // Configuration for backend API
+        const API_CONFIG = {
+            // Change this to your actual API URL when deploying
+            // For local testing on other devices, use your computer's IP address
+            // For production, use your deployed backend URL
+            URL: window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' 
+                ? 'http://127.0.0.1:5000/calculate'
+                : 'https://your-deployed-backend-url.com/calculate',
+            
+            // For local devices testing, use your computer's local network IP
+            // For example: 'http://192.168.1.100:5000/calculate'
+            LOCAL_NETWORK_URL: 'http://YOUR_LOCAL_IP:5000/calculate'
+        };
+        
+        // Fallback calculation function when backend is not available
+        function calculateLocally(expression) {
+            try {
+                // Basic validation
+                if (!/^[0-9+\-*/(). %]+$/.test(expression)) {
+                    throw new Error("Invalid characters in expression");
+                }
+                
+                // Handle percentage calculations
+                expression = expression.replace(/(\d+(\.\d+)?)%/g, function(match, number) {
+                    return parseFloat(number) / 100;
+                });
+                
+                // Execute calculation
+                // Note: eval is used here for simplicity, but for production,
+                // a more secure method like math.js library would be better
+                let result = eval(expression);
+                
+                // Format integers
+                if (result % 1 === 0) {
+                    return result;
+                }
+                
+                return result;
+            } catch (e) {
+                throw new Error("Could not calculate. Please check your expression.");
+            }
+        }
+        
+        function detectSpeechSupport() {
+            const hasSpeechRecognition = 'SpeechRecognition' in window || 'webkitSpeechRecognition' in window;
+            const hasSpeechSynthesis = 'speechSynthesis' in window;
+            
+            if (!hasSpeechRecognition) {
+                document.getElementById("voice-btn").disabled = true;
+                document.getElementById("voice-btn").title = "Voice recognition not supported in your browser";
+                document.getElementById("voice-btn").classList.add("disabled");
+            }
+            
+            return { hasSpeechRecognition, hasSpeechSynthesis };
+        }
+        
+        function startVoiceRecognition() {
+            // Create recognition object
+            let SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+            if (!SpeechRecognition) {
+                document.getElementById("status-message").innerText = "Voice recognition not supported in your browser";
+                return;
+            }
+            
+            let recognition = new SpeechRecognition();
+            recognition.lang = 'en-US';
+            recognition.continuous = false;
+            recognition.interimResults = false;
+            
+            // Request microphone permission
+            navigator.mediaDevices.getUserMedia({ audio: true })
+                .then(function(stream) {
+                    // Stop tracks to release microphone
+                    stream.getTracks().forEach(track => track.stop());
+                    
+                    // Start recognition after permission granted
+                    recognition.start();
+                    
+                    // Update UI to show listening state
+                    document.getElementById("voice-btn").classList.add("listening");
+                    document.getElementById("voice-indicator").style.display = "block";
+                    document.getElementById("status-message").innerText = "Listening...";
+                })
+                .catch(function(err) {
+                    document.getElementById("status-message").innerText = "Microphone access denied: " + err.message;
+                });
+            
+            recognition.onresult = function(event) {
+                let resultText = event.results[0][0].transcript;
+                document.getElementById("expression").value = resultText;
+                document.getElementById("voice-btn").classList.remove("listening");
+                document.getElementById("voice-indicator").style.display = "none";
+                document.getElementById("status-message").innerText = "Voice captured successfully";
+                
+                // Automatically trigger calculation after voice input
+                setTimeout(() => calculate(), 500);
+            };
+            
+            recognition.onerror = function(event) {
+                document.getElementById("voice-btn").classList.remove("listening");
+                document.getElementById("voice-indicator").style.display = "none";
+                document.getElementById("status-message").innerText = "Voice recognition error: " + event.error;
+            };
+            
+            recognition.onend = function() {
+                document.getElementById("voice-btn").classList.remove("listening");
+                document.getElementById("voice-indicator").style.display = "none";
+                if (document.getElementById("status-message").innerText === "Listening...") {
+                    document.getElementById("status-message").innerText = "No voice detected. Try again.";
+                }
+            };
+        }
+        
+        function calculate() {
+            let expression = document.getElementById("expression").value.trim();
+            if (!expression) {
+                document.getElementById("status-message").innerText = "Please enter an expression first";
+                highlightInput();
+                return;
+            }
+            
+            document.getElementById("status-message").innerText = "Processing...";
+            document.getElementById("calculate-btn").disabled = true;
+            document.getElementById("loader").style.display = "inline-block";
+            
+            // Show the expression in the result area
+            document.getElementById("calculation-expression").innerText = expression;
+            
+            // Try to calculate using the backend
+            fetch(API_CONFIG.URL, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ expression: expression })
+            })
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error("Server error: " + response.status);
+                }
+                return response.json();
+            })
+            .then(data => {
+                handleCalculationResult(expression, data.result);
+            })
+            .catch(error => {
+                console.log("Backend calculation failed, trying local fallback:", error);
+                // Try local calculation as fallback
+                try {
+                    const result = calculateLocally(expression);
+                    handleCalculationResult(expression, result.toString());
+                } catch (localError) {
+                    document.getElementById("loader").style.display = "none";
+                    document.getElementById("calculate-btn").disabled = false;
+                    document.getElementById("status-message").innerText = "Error: " + localError.message;
+                }
+            });
+        }
+        
+        function handleCalculationResult(expression, result) {
+            document.getElementById("loader").style.display = "none";
+            document.getElementById("calculate-btn").disabled = false;
+            
+            // Update result display
+            document.getElementById("result-value").innerText = result;
+            document.getElementById("result-card").style.display = "block";
+            document.getElementById("status-message").innerText = "Calculation complete";
+            
+            // Add to history
+            addToHistory(expression, result);
+            
+            // Speak the result if speech synthesis is available
+            if ('speechSynthesis' in window) {
+                speak(result);
+            }
+        }
+        
+        function speak(text) {
+            if ('speechSynthesis' in window) {
+                // Cancel any ongoing speech
+                window.speechSynthesis.cancel();
+                
+                let speech = new SpeechSynthesisUtterance();
+                speech.text = "The result is " + text;
+                speech.volume = 1;
+                speech.rate = 1;
+                speech.pitch = 1;
+                
+                window.speechSynthesis.speak(speech);
+            }
+        }
+        
+        function addToHistory(expression, result) {
+            const historyList = document.getElementById("history-list");
+            const timestamp = new Date().toLocaleTimeString();
+            
+            const historyItem = document.createElement("div");
+            historyItem.className = "history-item";
+            historyItem.innerHTML = `
+                <div class="history-content">
+                    <div class="history-expression">${expression}</div>
+                    <div class="history-result">${result}</div>
+                </div>
+                <div class="history-time">${timestamp}</div>
+                <button class="history-use-btn" onclick="useHistoryItem('${expression.replace(/'/g, "\\'")}')">
+                    <i class="fas fa-redo-alt"></i>
+                </button>
+            `;
+            
+            if (historyList.firstChild) {
+                historyList.insertBefore(historyItem, historyList.firstChild);
+            } else {
+                historyList.appendChild(historyItem);
+            }
+            
+            // Show history panel if it's the first item
+            if (historyList.childNodes.length === 1) {
+                document.getElementById("history-empty").style.display = "none";
+            }
+            
+            // Save to localStorage for persistence
+            saveHistoryToStorage();
+        }
+        
+        function saveHistoryToStorage() {
+            try {
+                const historyItems = [];
+                const items = document.querySelectorAll('.history-item');
+                
+                items.forEach(item => {
+                    const expression = item.querySelector('.history-expression').innerText;
+                    const result = item.querySelector('.history-result').innerText;
+                    const time = item.querySelector('.history-time').innerText;
+                    
+                    historyItems.push({ expression, result, time });
+                });
+                
+                localStorage.setItem('calculatorHistory', JSON.stringify(historyItems));
+            } catch (e) {
+                console.error("Failed to save history:", e);
+            }
+        }
+        
+        function loadHistoryFromStorage() {
+            try {
+                const savedHistory = localStorage.getItem('calculatorHistory');
+                if (savedHistory) {
+                    const historyItems = JSON.parse(savedHistory);
+                    
+                    if (historyItems.length > 0) {
+                        document.getElementById("history-empty").style.display = "none";
+                        
+                        const historyList = document.getElementById("history-list");
+                        historyItems.forEach(item => {
+                            const historyItem = document.createElement("div");
+                            historyItem.className = "history-item";
+                            historyItem.innerHTML = `
+                                <div class="history-content">
+                                    <div class="history-expression">${item.expression}</div>
+                                    <div class="history-result">${item.result}</div>
+                                </div>
+                                <div class="history-time">${item.time}</div>
+                                <button class="history-use-btn" onclick="useHistoryItem('${item.expression.replace(/'/g, "\\'")}')">
+                                    <i class="fas fa-redo-alt"></i>
+                                </button>
+                            `;
+                            historyList.appendChild(historyItem);
+                        });
+                    }
+                }
+            } catch (e) {
+                console.error("Failed to load history:", e);
+            }
+        }
+        
+        function useHistoryItem(expression) {
+            document.getElementById("expression").value = expression;
+            document.getElementById("expression").focus();
+        }
+        
+        function clearInput() {
+            document.getElementById("expression").value = "";
+            document.getElementById("result-card").style.display = "none";
+            document.getElementById("status-message").innerText = "";
+            document.getElementById("expression").focus();
+        }
+        
+        function clearHistory() {
+            document.getElementById("history-list").innerHTML = "";
+            document.getElementById("history-empty").style.display = "block";
+            localStorage.removeItem('calculatorHistory');
+        }
+        
+        function toggleHistoryPanel() {
+            const appContainer = document.getElementById("app-container");
+            if (appContainer.classList.contains("show-history")) {
+                appContainer.classList.remove("show-history");
+            } else {
+                appContainer.classList.add("show-history");
+            }
+        }
+        
+        function highlightInput() {
+            const input = document.getElementById("expression");
+            input.classList.add("highlight");
+            input.focus();
+            setTimeout(() => input.classList.remove("highlight"), 1000);
+        }
+        
+        function handleKeyPress(event) {
+            if (event.key === "Enter") {
+                calculate();
+            }
+        }
+        
+        // Initialize when page loads
+        window.onload = function() {
+            detectSpeechSupport();
+            loadHistoryFromStorage();
+            document.getElementById("expression").focus();
+            
+            // Check if app is being accessed via HTTPS
+            if (window.location.protocol !== 'https:' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
+                document.getElementById("status-message").innerHTML = 
+                    '<span style="color:#e53e3e;"><i class="fas fa-exclamation-triangle"></i> Voice input requires HTTPS for security reasons</span>';
+            }
+        };
+    </script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Roboto', 'Segoe UI', sans-serif;
+            background-color: #f0f2f5;
+            color: #333;
+            line-height: 1.5;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            padding: 20px;
+        }
+        
+        #app-container {
+            display: flex;
+            max-width: 900px;
+            width: 100%;
+            background-color: #ffffff;
+            border-radius: 16px;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.05);
+            overflow: hidden;
+            transition: all 0.3s ease;
+            position: relative;
+        }
+        
+        .calculator-main {
+            flex: 1;
+            padding: 0;
+            transition: all 0.3s ease;
+        }
+        
+        .calculator-header {
+            background-color: #5a67d8;
+            color: white;
+            padding: 24px 30px;
+            position: relative;
+        }
+        
+        .calculator-title {
+            font-size: 24px;
+            font-weight: 500;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        
+        .calculator-title i {
+            font-size: 22px;
+        }
+        
+        .history-toggle-btn {
+            position: absolute;
+            right: 20px;
+            top: 50%;
+            transform: translateY(-50%);
+            background: rgba(255, 255, 255, 0.2);
+            border: none;
+            color: white;
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        
+        .history-toggle-btn:hover {
+            background: rgba(255, 255, 255, 0.3);
+        }
+        
+        .calculator-body {
+            padding: 30px;
+        }
+        
+        .input-group {
+            position: relative;
+            margin-bottom: 25px;
+        }
+        
+        .calculator-input {
+            width: 100%;
+            padding: 16px 50px 16px 16px;
+            font-size: 18px;
+            border: 2px solid #e2e8f0;
+            border-radius: 10px;
+            outline: none;
+            transition: all 0.2s;
+        }
+        
+        .calculator-input:focus {
+            border-color: #5a67d8;
+            box-shadow: 0 0 0 3px rgba(90, 103, 216, 0.1);
+        }
+        
+        .calculator-input.highlight {
+            border-color: #f56565;
+            animation: shake 0.5s;
+        }
+        
+        @keyframes shake {
+            0%, 100% { transform: translateX(0); }
+            25% { transform: translateX(-5px); }
+            50% { transform: translateX(5px); }
+            75% { transform: translateX(-5px); }
+        }
+        
+        .clear-input-btn {
+            position: absolute;
+            right: 12px;
+            top: 50%;
+            transform: translateY(-50%);
+            background: none;
+            border: none;
+            color: #a0aec0;
+            cursor: pointer;
+            padding: 5px;
+            font-size: 18px;
+            transition: all 0.2s;
+        }
+        
+        .clear-input-btn:hover {
+            color: #4a5568;
+        }
+        
+        .buttons-container {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+        
+        .calculator-btn {
+            padding: 14px 20px;
+            border: none;
+            border-radius: 10px;
+            font-size: 16px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+        }
+        
+        .voice-btn {
+            background-color: #edf2f7;
+            color: #4a5568;
+        }
+        
+        .voice-btn:hover {
+            background-color: #e2e8f0;
+        }
+        
+        .voice-btn.listening {
+            background-color: #fed7d7;
+            color: #e53e3e;
+        }
+        
+        .voice-btn.disabled {
+            background-color: #e2e8f0;
+            color: #a0aec0;
+            cursor: not-allowed;
+        }
+        
+        .calculate-btn {
+            background-color: #5a67d8;
+            color: white;
+        }
+        
+        .calculate-btn:hover {
+            background-color: #4c51bf;
+        }
+        
+        .calculate-btn:disabled {
+            background-color: #a0aec0;
+            cursor: not-allowed;
+        }
+        
+        .status-container {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 24px;
+            margin-bottom: 25px;
+            color: #718096;
+            font-size: 14px;
+        }
+        
+        .voice-indicator {
+            display: none;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background-color: #e53e3e;
+            margin-right: 8px;
+            animation: pulse 1.5s infinite;
+        }
+        
+        @keyframes pulse {
+            0% { transform: scale(0.95); opacity: 1; }
+            50% { transform: scale(1.1); opacity: 0.8; }
+            100% { transform: scale(0.95); opacity: 1; }
+        }
+        
+        .loader {
+            display: none;
+            width: 16px;
+            height: 16px;
+            border: 2px solid #e2e8f0;
+            border-top: 2px solid #5a67d8;
+            border-radius: 50%;
+            margin-right: 8px;
+            animation: spin 1s linear infinite;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        .result-card {
+            display: none;
+            background-color: #f7fafc;
+            border-radius: 10px;
+            padding: 20px;
+            margin-top: 10px;
+        }
+        
+        .result-header {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 15px;
+            color: #718096;
+            font-size: 14px;
+        }
+        
+        .calculation-expression {
+            font-style: italic;
+            color: #4a5568;
+            overflow-wrap: break-word;
+            word-break: break-all;
+        }
+        
+        .result-value {
+            font-size: 28px;
+            font-weight: 600;
+            color: #2d3748;
+            margin-top: 5px;
+            overflow-wrap: break-word;
+            word-break: break-all;
+        }
+        
+        /* History Panel */
+        .history-panel {
+            width: 0;
+            background-color: #f7fafc;
+            overflow: hidden;
+            transition: all 0.3s ease;
+            border-left: 1px solid #e2e8f0;
+        }
+        
+        #app-container.show-history .history-panel {
+            width: 300px;
+        }
+        
+        #app-container.show-history .calculator-main {
+            border-top-right-radius: 0;
+            border-bottom-right-radius: 0;
+        }
+        
+        .history-header {
+            padding: 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid #e2e8f0;
+        }
+        
+        .history-title {
+            font-size: 18px;
+            font-weight: 500;
+            color: #4a5568;
+        }
+        
+        .history-clear-btn {
+            background: none;
+            border: none;
+            color: #a0aec0;
+            cursor: pointer;
+            font-size: 14px;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+        
+        .history-clear-btn:hover {
+            color: #e53e3e;
+        }
+        
+        .history-content {
+            padding: 15px 20px;
+            height: calc(100% - 70px);
+            overflow-y: auto;
+        }
+        
+        .history-empty {
+            text-align: center;
+            color: #a0aec0;
+            padding: 30px 0;
+        }
+        
+        .history-empty i {
+            font-size: 40px;
+            margin-bottom: 15px;
+            opacity: 0.5;
+        }
+        
+        .history-item {
+            padding: 15px 0;
+            border-bottom: 1px solid #e2e8f0;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .history-content {
+            flex: 1;
+            margin-bottom: 5px;
+        }
+        
+        .history-expression {
+            font-size: 14px;
+            color: #718096;
+            margin-bottom: 5px;
+            word-break: break-all;
+        }
+        
+        .history-result {
+            font-size: 16px;
+            font-weight: 500;
+            color: #2d3748;
+        }
+        
+        .history-time {
+            font-size: 12px;
+            color: #a0aec0;
+            margin-bottom: 5px;
+        }
+        
+        .history-use-btn {
+            background: none;
+            border: none;
+            color: #5a67d8;
+            cursor: pointer;
+            font-size: 14px;
+            align-self: flex-end;
+            width: 30px;
+            height: 30px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 50%;
+        }
+        
+        .history-use-btn:hover {
+            background-color: #ebf4ff;
+        }
+        
+        .footer {
+            text-align: center;
+            font-size: 12px;
+            color: #a0aec0;
+            padding: 15px;
+            border-top: 1px solid #e2e8f0;
+        }
+        
+        @media (max-width: 768px) {
+            #app-container {
+                flex-direction: column;
+                max-width: 500px;
+            }
+            
+            #app-container.show-history .history-panel {
+                width: 100%;
+                height: 300px;
+            }
+            
+            .history-panel {
+                width: 100%;
+                height: 0;
+                border-left: none;
+                border-top: 1px solid #e2e8f0;
+            }
+        }
+        
+        @media (max-width: 480px) {
+            .calculator-body {
+                padding: 20px;
+            }
+            
+            .calculator-header {
+                padding: 15px 20px;
+            }
+            
+            .calculator-title {
+                font-size: 20px;
+            }
+            
+            .buttons-container {
+                grid-template-columns: 1fr;
+            }
+            
+            .calculator-input {
+                font-size: 16px;
+                padding: 12px 40px 12px 12px;
+            }
+            
+            .result-value {
+                font-size: 22px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div id="app-container">
+        <main class="calculator-main">
+            <header class="calculator-header">
+                <div class="calculator-title">
+                    <i class="fas fa-calculator"></i>
+                    AI Voice Calculator Pro
+                </div>
+                <button class="history-toggle-btn" onclick="toggleHistoryPanel()">
+                    <i class="fas fa-history"></i>
+                </button>
+            </header>
+            
+            <div class="calculator-body">
+                <div class="input-group">
+                    <input type="text" id="expression" class="calculator-input" placeholder="Type or speak your math expression" onkeypress="handleKeyPress(event)">
+                    <button class="clear-input-btn" onclick="clearInput()">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+                
+                <div class="buttons-container">
+                    <button id="voice-btn" class="calculator-btn voice-btn" onclick="startVoiceRecognition()">
+                        <i class="fas fa-microphone"></i>
+                        Voice Input
+                    </button>
+                    <button id="calculate-btn" class="calculator-btn calculate-btn" onclick="calculate()">
+                        <i class="fas fa-equals"></i>
+                        Calculate
+                    </button>
+                </div>
+                
+                <div class="status-container">
+                    <div id="voice-indicator" class="voice-indicator"></div>
+                    <div id="loader" class="loader"></div>
+                    <span id="status-message"></span>
+                </div>
+                
+                <div id="result-card" class="result-card">
+                    <div class="result-header">
+                        <span>Expression:</span>
+                    </div>
+                    <div id="calculation-expression" class="calculation-expression"></div>
+                    <div class="result-header" style="margin-top: 15px;">
+                        <span>Result:</span>
+                    </div>
+                    <div id="result-value" class="result-value"></div>
+                </div>
+            </div>
+            
+            <footer class="footer">
+                © 2025 AI Voice Calculator Pro | Powered by Web Speech API
+            </footer>
+        </main>
+        
+        <aside class="history-panel">
+            <div class="history-header">
+                <div class="history-title">History</div>
+                <button class="history-clear-btn" onclick="clearHistory()">
+                    <i class="fas fa-trash-alt"></i> Clear
+                </button>
+            </div>
+            <div class="history-content">
+                <div id="history-empty" class="history-empty">
+                    <i class="fas fa-history"></i>
+                    <p>No calculations yet</p>
+                </div>
+                <div id="history-list"></div>
+            </div>
+        </aside>
+    </div>
+</body>
+</html>
