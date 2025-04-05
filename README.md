@@ -7,8 +7,7 @@ A sophisticated voice-enabled calculator that understands natural language math 
 ## Features ✨
 
 - **Voice Input**: Speak math expressions naturally
-- **Advanced Calculations**: Supports scientific functions (trigonometry, logarithms, etc.)
-- **Natural Language Processing**: Understands phrases like "two plus two" or "square root of sixteen"
+- **Natural Language Processing**: Understands phrases like "two plus two"
 - **Speech Output**: Results are read aloud
 - **Calculation History**: Keeps track of previous calculations
 - **Responsive Design**: Works on desktop and mobile devices
